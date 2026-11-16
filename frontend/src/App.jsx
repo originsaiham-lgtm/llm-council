@@ -10,18 +10,6 @@ function App() {
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load conversations on mount
-  useEffect(() => {
-    loadConversations();
-  }, []);
-
-  // Load conversation details when selected
-  useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
-    }
-  }, [currentConversationId]);
-
   const loadConversations = async () => {
     try {
       const convs = await api.listConversations();
@@ -31,14 +19,22 @@ function App() {
     }
   };
 
-  const loadConversation = async (id) => {
-    try {
-      const conv = await api.getConversation(id);
-      setCurrentConversation(conv);
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-    }
-  };
+  // Load conversations on mount
+  useEffect(() => {
+    api
+      .listConversations()
+      .then(setConversations)
+      .catch((error) => console.error('Failed to load conversations:', error));
+  }, []);
+
+  // Load conversation details when selected
+  useEffect(() => {
+    if (!currentConversationId) return;
+    api
+      .getConversation(currentConversationId)
+      .then(setCurrentConversation)
+      .catch((error) => console.error('Failed to load conversation:', error));
+  }, [currentConversationId]);
 
   const handleNewConversation = async () => {
     try {
@@ -89,65 +85,55 @@ function App() {
         messages: [...prev.messages, assistantMessage],
       }));
 
+      // Update the in-progress assistant message without mutating state
+      const updateLastMessage = (update) => {
+        setCurrentConversation((prev) => {
+          const messages = [...prev.messages];
+          const lastMsg = messages[messages.length - 1];
+          messages[messages.length - 1] = update(lastMsg);
+          return { ...prev, messages };
+        });
+      };
+      const setStageLoading = (msg, stage, value) => ({
+        ...msg,
+        loading: { ...msg.loading, [stage]: value },
+      });
+
       // Send message with streaming
       await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
-              return { ...prev, messages };
-            });
+            updateLastMessage((msg) => setStageLoading(msg, 'stage1', true));
             break;
 
           case 'stage1_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
-              return { ...prev, messages };
-            });
+            updateLastMessage((msg) => ({
+              ...setStageLoading(msg, 'stage1', false),
+              stage1: event.data,
+            }));
             break;
 
           case 'stage2_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
-              return { ...prev, messages };
-            });
+            updateLastMessage((msg) => setStageLoading(msg, 'stage2', true));
             break;
 
           case 'stage2_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
-              return { ...prev, messages };
-            });
+            updateLastMessage((msg) => ({
+              ...setStageLoading(msg, 'stage2', false),
+              stage2: event.data,
+              metadata: event.metadata,
+            }));
             break;
 
           case 'stage3_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
-              return { ...prev, messages };
-            });
+            updateLastMessage((msg) => setStageLoading(msg, 'stage3', true));
             break;
 
           case 'stage3_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
-              return { ...prev, messages };
-            });
+            updateLastMessage((msg) => ({
+              ...setStageLoading(msg, 'stage3', false),
+              stage3: event.data,
+            }));
             break;
 
           case 'title_complete':
@@ -163,6 +149,11 @@ function App() {
 
           case 'error':
             console.error('Stream error:', event.message);
+            updateLastMessage((msg) => ({
+              ...msg,
+              loading: { stage1: false, stage2: false, stage3: false },
+              stage3: msg.stage3 || { model: 'error', response: `Error: ${event.message}` },
+            }));
             setIsLoading(false);
             break;
 
@@ -170,6 +161,8 @@ function App() {
             console.log('Unknown event type:', eventType);
         }
       });
+      // Make sure the UI never stays stuck if the stream closes early
+      setIsLoading(false);
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error

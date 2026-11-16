@@ -91,13 +91,17 @@ export const api = {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      // A network chunk can end mid-event (large stage payloads often do),
+      // so keep the trailing partial line until the rest arrives.
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {

@@ -44,7 +44,7 @@ async def query_model(
             message = data['choices'][0]['message']
 
             return {
-                'content': message.get('content'),
+                'content': message.get('content') or '',
                 'reasoning_details': message.get('reasoning_details')
             }
 

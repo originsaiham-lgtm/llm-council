@@ -187,6 +187,9 @@ def parse_ranking_from_text(ranking_text: str) -> List[str]:
     import re
 
     # Look for "FINAL RANKING:" section
+    if not ranking_text:
+        return []
+
     if "FINAL RANKING:" in ranking_text:
         # Extract everything after "FINAL RANKING:"
         parts = ranking_text.split("FINAL RANKING:")
@@ -194,18 +197,24 @@ def parse_ranking_from_text(ranking_text: str) -> List[str]:
             ranking_section = parts[1]
             # Try to extract numbered list format (e.g., "1. Response A")
             # This pattern looks for: number, period, optional space, "Response X"
-            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]', ranking_section)
+            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]\b', ranking_section)
             if numbered_matches:
                 # Extract just the "Response X" part
-                return [re.search(r'Response [A-Z]', m).group() for m in numbered_matches]
+                return _dedupe([re.search(r'Response [A-Z]', m).group() for m in numbered_matches])
 
             # Fallback: Extract all "Response X" patterns in order
-            matches = re.findall(r'Response [A-Z]', ranking_section)
-            return matches
+            matches = re.findall(r'Response [A-Z]\b', ranking_section)
+            return _dedupe(matches)
 
     # Fallback: try to find any "Response X" patterns in order
-    matches = re.findall(r'Response [A-Z]', ranking_text)
-    return matches
+    matches = re.findall(r'Response [A-Z]\b', ranking_text)
+    return _dedupe(matches)
+
+
+def _dedupe(labels: List[str]) -> List[str]:
+    """Keep the first occurrence of each label, preserving order."""
+    seen = set()
+    return [label for label in labels if not (label in seen or seen.add(label))]
 
 
 def calculate_aggregate_rankings(
